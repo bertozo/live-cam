@@ -8,6 +8,7 @@ import java.util.UUID
 import java.util.concurrent.CopyOnWriteArrayList
 
 private const val BOUNDARY = "livecamframe"
+private const val REMEMBER_MAX_AGE_SECONDS = 30 * 24 * 60 * 60 // 30 days
 
 /**
  * Minimal local-network web server: a login page gated by [accessCode], and an MJPEG
@@ -72,8 +73,13 @@ class MjpegServer(
 
         val token = UUID.randomUUID().toString()
         activeSessions += token
+        val remember = session.parms["remember"] != null
+        val cookie = buildString {
+            append("session=$token; Path=/; HttpOnly")
+            if (remember) append("; Max-Age=$REMEMBER_MAX_AGE_SECONDS")
+        }
         val response = newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", viewerHtml())
-        response.addHeader("Set-Cookie", "session=$token; Path=/; HttpOnly")
+        response.addHeader("Set-Cookie", cookie)
         return response
     }
 
@@ -118,6 +124,7 @@ class MjpegServer(
                 form { background: #1c1c1c; padding: 32px; border-radius: 12px; text-align: center; width: 260px; }
                 h1 { font-size: 20px; margin-top: 0; }
                 input { width: 100%; box-sizing: border-box; font-size: 24px; text-align: center; letter-spacing: 4px; padding: 12px; border-radius: 8px; border: 1px solid #444; background: #000; color: #fff; margin-bottom: 16px; }
+                label { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #ccc; margin-bottom: 16px; text-align: left; }
                 button { width: 100%; padding: 12px; border-radius: 8px; border: none; background: #E53935; color: #fff; font-size: 16px; cursor: pointer; }
                 p.error { color: #ff6b6b; margin-top: 0; }
             </style>
@@ -127,6 +134,7 @@ class MjpegServer(
                 <h1>Codigo de acesso</h1>
                 ${if (showError) "<p class=\"error\">Codigo invalido, tente novamente.</p>" else ""}
                 <input name="code" inputmode="numeric" maxlength="6" autofocus autocomplete="off" placeholder="000000">
+                <label><input type="checkbox" name="remember" style="width:auto;margin:0;"> Lembrar este dispositivo</label>
                 <button type="submit">Entrar</button>
             </form>
         </body>

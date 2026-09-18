@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -34,6 +35,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +47,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.runtime.collectAsState
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
@@ -62,10 +63,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (hasCameraPermission()) viewModel.bindService()
+    }
+
+    // Deliberately no stopStreaming() here: the camera and the HTTP server live in
+    // StreamService, which keeps running (screen off, app backgrounded) after this unbind.
     override fun onStop() {
         super.onStop()
-        viewModel.stopStreaming()
+        viewModel.unbindService()
     }
+
+    private fun hasCameraPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 }
 
 @Composable
@@ -76,12 +87,23 @@ fun LiveCamScreen(viewModel: StreamViewModel) {
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         )
     }
-    val permissionLauncher = rememberLauncherForActivityResult(
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted -> hasCameraPermission = granted }
+    ) { granted ->
+        hasCameraPermission = granted
+        if (granted) viewModel.bindService()
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* best-effort: the ongoing notification just won't show if denied */ }
 
     LaunchedEffect(Unit) {
-        if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
+        if (!hasCameraPermission) {
+            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     val uiState by viewModel.uiState.collectAsState()
@@ -89,12 +111,11 @@ fun LiveCamScreen(viewModel: StreamViewModel) {
     Box(Modifier.fillMaxSize()) {
         if (hasCameraPermission) {
             CameraPreview(
-                isStreaming = uiState.isStreaming,
-                onFrame = viewModel::onFrame,
+                onSurfaceProviderChanged = viewModel::attachPreviewSurface,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
-            PermissionRationale(onRequestPermission = { permissionLauncher.launch(Manifest.permission.CAMERA) })
+            PermissionRationale(onRequestPermission = { cameraPermissionLauncher.launch(Manifest.permission.CAMERA) })
         }
 
         Column(
